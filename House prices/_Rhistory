@@ -1,0 +1,512 @@
+)
+#The only difference between the R code used for ridge regression is that, for lasso regression you need to specify the argument alpha = 1 instead of alpha = 0 (for ridge regression).
+# Find the best lambda using cross-validation
+set.seed(123)
+cv <- cv.glmnet(x, y, alpha = 1)
+# Display the best lambda value
+cv$lambda.min
+# Fit the final model on the training data
+model <- glmnet(x, y, alpha = 1, lambda = cv$lambda.min)
+# Dsiplay regression coefficients
+coef(model)
+# Make predictions on the test data
+x.test <- model.matrix(medv ~., test.data)[,-1]
+predictions <- model %>% predict(x.test) %>% as.vector()
+# Model performance metrics
+data.frame(
+RMSE = RMSE(predictions, test.data$medv),
+Rsquare = R2(predictions, test.data$medv)
+)
+#---------------------------------------elastic net regession----------------------------
+#Elastic Net produces a regression model that is penalized with both the L1-norm and L2-norm. The consequence of this is to effectively shrink coefficients (like in ridge regression) and to set some coefficients to zero (as in LASSO).
+#The elastic net regression can be easily computed using the caret workflow, which invokes the glmnet package.
+#We use caret to automatically select the best tuning parameters alpha and lambda. The caret packages tests a range of possible alpha and lambda values, then selects the best values for lambda and alpha, resulting to a final model that is an elastic net model.
+#Here, we'll test the combination of 10 different values for alpha and lambda. This is specified using the option tuneLength.
+#The best alpha and lambda values are those values that minimize the cross-validation error
+# Build the model using the training set
+set.seed(123)
+model <- train(
+medv ~., data = train.data, method = "glmnet",
+trControl = trainControl("cv", number = 10),
+tuneLength = 10
+)
+# Best tuning parameter
+model$bestTune
+# Coefficient of the final model. You need to specify the best lambda
+coef(model$finalModel, model$bestTune$lambda)
+# Make predictions on the test data
+x.test <- model.matrix(medv ~., test.data)[,-1]
+predictions <- model %>% predict(x.test)
+# Model performance metrics
+data.frame(
+RMSE = RMSE(predictions, test.data$medv),
+Rsquare = R2(predictions, test.data$medv)
+)
+#All things equal, we should go for the simpler model. In our example, we can choose the lasso or the elastic net regression models.
+#============================================================
+#-----------------------Using caret package------------------------------
+#caret will automatically choose the best tuning parameter values, compute the final model and evaluate the model performance using cross-validation techniques.
+#-------Setup a grid range of lambda values::
+lambda <- 10^seq(-3, 3, length = 100)
+lambda
+#---------Compute ridge regression::
+# Build the model
+set.seed(123)
+ridge <- train(
+medv ~., data = train.data, method = "glmnet",
+trControl = trainControl("cv", number = 10),
+tuneGrid = expand.grid(alpha = 0, lambda = lambda)
+)
+# Model coefficients
+coef(ridge$finalModel, ridge$bestTune$lambda)
+# Make predictions
+predictions <- ridge %>% predict(test.data)
+# Model prediction performance
+data.frame(
+RMSE = RMSE(predictions, test.data$medv),
+Rsquare = R2(predictions, test.data$medv)
+)
+#----------Compute lasso regression:
+# Build the model
+set.seed(123)
+lasso <- train(
+medv ~., data = train.data, method = "glmnet",
+trControl = trainControl("cv", number = 10),
+tuneGrid = expand.grid(alpha = 1, lambda = lambda)
+)
+# Model coefficients
+coef(lasso$finalModel, lasso$bestTune$lambda)
+# Make predictions
+predictions <- lasso %>% predict(test.data)
+# Model prediction performance
+data.frame(
+RMSE = RMSE(predictions, test.data$medv),
+Rsquare = R2(predictions, test.data$medv)
+)
+#-----------Elastic net regression:
+# Build the model
+set.seed(123)
+elastic <- train(
+medv ~., data = train.data, method = "glmnet",
+trControl = trainControl("cv", number = 10),
+tuneLength = 10
+)
+# Model coefficients
+coef(elastic$finalModel, elastic$bestTune$lambda)
+# Make predictions
+predictions <- elastic %>% predict(test.data)
+# Model prediction performance
+data.frame(
+RMSE = RMSE(predictions, test.data$medv),
+Rsquare = R2(predictions, test.data$medv)
+)
+#------------Comparing models performance:
+#The performance of the different models - ridge, lasso and elastic net - can be easily compared using caret. The best model is defined as the one that minimizes the prediction error.
+models <- list(ridge = ridge, lasso = lasso, elastic = elastic)
+resamples(models) %>% summary( metric = "RMSE")
+#Cross-Validation
+#http://www.sthda.com/english/articles/38-regression-model-validation/157-cross-validation-essentials-in-r/
+#R2, RMSE and MAE are used to measure the regression model performance during cross-validation.
+#--------------------------------------
+#The basic idea, behind cross-validation techniques, consists of dividing the data into two sets:
+#The training set, used to train (i.e. build) the model;
+#and the testing set (or validation set), used to test (i.e. validate) the model by estimating the prediction error.
+library(tidyverse)  #tidyverse for easy data manipulation and visualization
+library(caret)      #caret for easy machine learning workflow
+# Load the data
+data("swiss")
+# Inspect the data
+sample_n(swiss, 3)
+#------------------------
+#cross-validation algorithms can be summarized as follow:
+#Reserve a small sample of the data set
+#Build (or train) the model using the remaining part of the data set
+#Test the effectiveness of the model on the the reserved sample of the data set. If the model works well on the test data set, then it's good.
+#--------------------------
+# Split the data into training and test set
+set.seed(123)
+training.samples <- swiss$Fertility %>%
+createDataPartition(p = 0.8, list = FALSE)
+train.data  <- swiss[training.samples, ]
+test.data <- swiss[-training.samples, ]
+# Build the model
+model <- lm(Fertility ~., data = train.data)
+# Make predictions and compute the R2, RMSE and MAE
+predictions <- model %>% predict(test.data)
+data.frame( R2 = R2(predictions, test.data$Fertility),
+RMSE = RMSE(predictions, test.data$Fertility),
+MAE = MAE(predictions, test.data$Fertility))
+#When comparing two models, the one that produces the lowest test sample RMSE is the preferred model.
+#Note that, the validation set method is only useful when you have a large data set that can be partitioned.
+RMSE(predictions, test.data$Fertility)/mean(test.data$Fertility)
+#Dividing the RMSE by the average value of the outcome variable will give you the prediction error rate, which should be as small as possible:
+#-------------------------Leave one out cross validation - LOOCV----------------------
+#Leave out one data point and build the model on the rest of the data set
+#Test the model against the data point that is left out at step 1 and record the test error associated with the prediction
+#Repeat the process for all data points
+#Compute the overall prediction error by taking the average of all these test error estimates recorded at step 2.
+# Define training control
+train.control <- trainControl(method = "LOOCV")
+# Train the model
+model <- train(Fertility ~., data = swiss, method = "lm",
+trControl = train.control)
+# Summarize the results
+print(model)
+# Define training control
+set.seed(123)
+train.control <- trainControl(method = "cv", number = 10)
+# Train the model
+model <- train(Fertility ~., data = swiss, method = "lm",
+trControl = train.control)
+# Summarize the results
+print(model)
+#------------------------------Repeated K-fold cross-validation--------------------------
+#The process of splitting the data into k-folds can be repeated a number of times, this is called repeated k-fold cross validation.
+# Define training control
+set.seed(123)
+train.control <- trainControl(method = "repeatedcv",
+number = 10, repeats = 3)
+# Train the model
+model <- train(Fertility ~., data = swiss, method = "lm",
+trControl = train.control)
+# Summarize the results
+print(model)
+View(lasso)
+library(precrec)
+install.packages("precrec")
+library(precrec)
+# Load a test dataset
+data(P10N10)
+# Load a test dataset
+data(P10N10)
+P10N10
+view(P10N10)
+sample_n(P10N10)
+# Calculate ROC and Precision-Recall curves
+sscurves <- evalmod(scores = P10N10$scores, labels = P10N10$labels)
+# The ggplot2 package is required
+library(ggplot2)
+# Show ROC and Precision-Recall plots
+autoplot(sscurves)
+sample_n(as.matrix(P10N10))
+sample_n  <-(as.matrix(P10N10))
+View(sample_n)
+#Evaluation of Classification Model Accuracy
+#After building a predictive classification model, you need to evaluate the performance of the model, that is how good the model is in predicting the outcome of new observations test data that have been not used to train the model.
+#we know the actual outcome of observations in the test data set, the performance of the predictive model can be assessed by comparing the predicted outcome values against the known outcome values.
+library(tidyverse)
+library(caret)
+#-----Building a classification model
+#To keep things simple, we’ll perform a binary classification, where the outcome variable can have only two possible values: negative vs positive.
+# Load the data
+data("PimaIndiansDiabetes2", package = "mlbench")
+pima.data <- na.omit(PimaIndiansDiabetes2)
+# Inspect the data
+sample_n(pima.data, 3)
+# Split the data into training and test set
+set.seed(123)
+training.samples <- pima.data$diabetes %>%
+createDataPartition(p = 0.8, list = FALSE)
+train.data  <- pima.data[training.samples, ]
+test.data <- pima.data[-training.samples, ]
+library(MASS)
+# Fit LDA
+fit <- lda(diabetes ~., data = train.data)
+# Make predictions on the test data
+predictions <- predict(fit, test.data)
+prediction.probabilities <- predictions$posterior[,2]
+predicted.classes <- predictions$class
+observed.classes <- test.data$diabetes
+#-------Overall classification accuracy
+#Determining the raw classification accuracy is the first step in assessing the performance of a model.
+#classification error rate is defined as the proportion of observations that have been misclassified. Error rate = 1 - accuracy
+#The raw classification accuracy and error can be easily computed by comparing the observed classes in the test data against the predicted classes by the model:
+accuracy <- mean(observed.classes == predicted.classes)
+accuracy
+error <- mean(observed.classes != predicted.classes)
+error
+#--------Confusion matrix
+#The R function table() can be used to produce a confusion matrix in order to determine how many observations were correctly or incorrectly classified.
+# It compares the observed and the predicted outcome values and shows the number of correct and incorrect predictions categorized by type of outcome.
+# Confusion matrix, number of cases
+table(observed.classes, predicted.classes)
+# Confusion matrix, proportion of cases
+prop.table() %>% round(digits = 3
+# Confusion matrix, proportion of cases
+table(observed.classes, predicted.classes) %>%
+# Confusion matrix, proportion of cases
+table(observed.classes, predicted.classes) %>%
+# Confusion matrix, proportion of cases
+table(observed.classes, predicted.classes) %>%
+prop.table() %>% round(digits = 3)
+# Confusion matrix, proportion of cases
+table(observed.classes, predicted.classes) %>%
+prop.table() %>% round(digits = 3)
+#Technically the raw prediction accuracy of the model is defined as (TruePositives + TrueNegatives)/SampleSize.
+#-------------Precision, Recall and Specificity
+#Precision::, which is the proportion of true positives among all the individuals that have been predicted to be diabetes-positive by the model. This represents the accuracy of a predicted positive outcome. Precision = TruePositives/(TruePositives + FalsePositives).
+#Sensitivity (or Recall)::, which is the True Positive Rate (TPR) or the proportion of identified positives among the diabetes-positive population (class = 1). Sensitivity = TruePositives/(TruePositives + FalseNegatives).
+#Specificity::, which measures the True Negative Rate (TNR), that is the proportion of identified negatives among the diabetes-negative population (class = 0). Specificity = TrueNegatives/(TrueNegatives + FalseNegatives).
+#False Positive Rate (FPR)::, which represents the proportion of identified positives among the healthy individuals (i.e. diabetes-negative). This can be seen as a false alarm. The FPR can be also calculated as 1-specificity. When positives are rare, the FPR can be high, leading to the situation where a predicted positive is most likely a negative.
+#Sensitivy and Specificity are commonly used to measure the performance of a predictive model.
+confusionMatrix(predicted.classes, observed.classes,
+positive = "pos")#you might need to specify the optional argument positive, which is a character string for the factor level that corresponds to a “positive” result (if that makes sense for your data).
+#ROC curve
+#The ROC curve (or receiver operating characteristics curve ) is a popular graphical measure for assessing the performance or the accuracy of a classifier, which corresponds to the total proportion of correctly classified observations.
+#Since we don’t usually know the probability cutoff in advance, the ROC curve is typically used to plot the true positive rate (or sensitivity on y-axis) against the false positive rate (or “1-specificity” on x-axis) at all possible probability cutoffs.
+# This shows the trade off between the rate at which you can correctly predict something with the rate of incorrectly predicting something. Another visual representation of the ROC plot is to simply display the sensitive against the specificity.
+#The Area Under the Curve (AUC) summarizes the overall performance of the classifier, over all possible probability cutoffs. It represents the ability of a classification algorithm to distinguish 1s from 0s (i.e, events from non-events or positives from negatives).
+#For a good model, the ROC curve should rise steeply, indicating that the true positive rate (y-axis) increases faster than the false positive rate (x-axis) as the probability threshold decreases.
+#So, the “ideal point” is the top left corner of the graph, that is a false positive rate of zero, and a true positive rate of one. This is not very realistic, but it does mean that the larger the AUC the better the classifier.
+#The AUC metric varies between 0.50 (random classifier) and 1.00. Values above 0.80 is an indication of a good classifier.
+#-----Computing and plotting ROC curve
+library(pROC)
+#ROC curve
+#The ROC curve (or receiver operating characteristics curve ) is a popular graphical measure for assessing the performance or the accuracy of a classifier, which corresponds to the total proportion of correctly classified observations.
+#Since we don’t usually know the probability cutoff in advance, the ROC curve is typically used to plot the true positive rate (or sensitivity on y-axis) against the false positive rate (or “1-specificity” on x-axis) at all possible probability cutoffs.
+# This shows the trade off between the rate at which you can correctly predict something with the rate of incorrectly predicting something. Another visual representation of the ROC plot is to simply display the sensitive against the specificity.
+#The Area Under the Curve (AUC) summarizes the overall performance of the classifier, over all possible probability cutoffs. It represents the ability of a classification algorithm to distinguish 1s from 0s (i.e, events from non-events or positives from negatives).
+#For a good model, the ROC curve should rise steeply, indicating that the true positive rate (y-axis) increases faster than the false positive rate (x-axis) as the probability threshold decreases.
+#So, the “ideal point” is the top left corner of the graph, that is a false positive rate of zero, and a true positive rate of one. This is not very realistic, but it does mean that the larger the AUC the better the classifier.
+#The AUC metric varies between 0.50 (random classifier) and 1.00. Values above 0.80 is an indication of a good classifier.
+#-----Computing and plotting ROC curve
+install.packages("pROC")
+library(pROC)
+# Compute roc
+res.roc <- roc(observed.classes, prediction.probabilities)
+plot.roc(res.roc, print.auc = TRUE)
+#The gray diagonal line represents a classifier no better than random chance.
+#A highly performant classifier will have an ROC that rises steeply to the top-left corner, that is it will correctly identify lots of positives without misclassifying lots of negatives as positives.
+#In our example, the AUC is 0.85, which is close to the maximum ( max = 1). So, our classifier can be considered as very good. A classifier that performs no better than chance is expected to have an AUC of 0.5 when evaluated on an independent test set not used to train the model.
+# Extract some interesting results
+roc.data <- data_frame(
+thresholds = res.roc$thresholds,
+sensitivity = res.roc$sensitivities,
+specificity = res.roc$specificities
+)
+# Get the probality threshold for specificity = 0.6
+roc.data %>% filter(specificity >= 0.6)
+#The best threshold with the highest sum sensitivity + specificity can be printed as follow. There might be more than one threshold.
+plot.roc(res.roc, print.auc = TRUE, print.thres = "best")
+#result:::Here, the best probability cutoff is 0.335 resulting to a predictive classifier with a specificity of 0.84 and a sensitivity of 0.660.
+#Note that, print.thres can be also a numeric vector containing a direct definition of the thresholds to display:
+plot.roc(res.roc, print.thres = c(0.3, 0.5, 0.7))
+#-------Multiple ROC curves
+#If you have grouping variables in your data, you might wish to create multiple ROC curves on the same plot.
+# Create some grouping variable
+glucose <- ifelse(test.data$glucose < 127.5, "glu.low", "glu.high")
+age <- ifelse(test.data$age < 28.5, "young", "old")
+roc.data <- roc.data %>%
+filter(thresholds !=-Inf) %>%
+mutate(glucose = glucose, age =  age)
+# Create ROC curve
+ggplot(roc.data, aes(specificity, sensitivity)) +
+geom_path(aes(color = age))+
+scale_x_reverse(expand = c(0,0))+
+scale_y_continuous(expand = c(0,0))+
+geom_abline(intercept = 1, slope = 1, linetype = "dashed")+
+theme_bw()
+#------------Multiclass settings
+#We start by building a linear discriminant model using the iris data set, which contains the length and width of sepals and petals for three iris species.
+# We want to predict the species based on the sepal and petal parameters using LDA.
+# Load the data
+data("iris")
+# Split the data into training (80%) and test set (20%)
+set.seed(123)
+training.samples <- iris$Species %>%
+createDataPartition(p = 0.8, list = FALSE)
+train.data <- iris[training.samples, ]
+test.data <- iris[-training.samples, ]
+# Build the model on the train set
+library(MASS)
+model <- lda(Species ~., data = train.data)
+# Model accuracy
+confusionMatrix(predictions$class, test.data$Species)
+#Performance metrics (sensitivity, specificity, …) of the predictive model can be calculated, separately for each class, comparing each factor level to the remaining levels (i.e. a “one versus all” approach).
+# Make predictions on the test data
+predictions <- model %>% predict(test.data)
+# Model accuracy
+confusionMatrix(predictions$class, test.data$Species)
+# it provides several features which makes it a one stop solution for all the modeling needs for supervised machine learning problems.
+install.packages("caret", dependencies = c("Depends", "Suggests"))
+setwd("C:/Users/Ami Laddani/Desktop/House prices")
+train <- read.csv("train.csv", stringsAsFactors = F)
+test <- read.csv("test.csv", stringsAsFactors = F)
+View(test)
+#------- Data size and structure
+dim(train)
+str(train[,c(1:10, 81)]) #display first 10 variables and the response variable
+View(train)
+#Getting rid of the IDs but keeping the test IDs in a vector. These are needed to compose the submission file
+test_labels <- test$Id
+test$Id <- NULL
+train$Id <- NULL
+test$SalePrice <- NA
+all <- rbind(train, test)
+dim(all)
+View(test)
+#===========Exploring some of the most important variables
+#---The response variable; SalePrice
+ggplot(data=all[!is.na(all$SalePrice),], aes(x=SalePrice)) +
+geom_histogram(fill="blue", binwidth = 10000) +
+scale_x_continuous(breaks= seq(0, 800000, by=100000), labels = comma)
+#House prices: Lasso, XGBoost, and a detailed EDA
+#----------------------------------------------
+library(knitr)
+library(ggplot2)
+library(plyr)
+library(dplyr)
+library(corrplot)
+library(caret)
+library(gridExtra)
+library(scales)
+library(Rmisc)
+library(ggrepel)
+library(randomForest)
+library(psych)
+library(xgboost)
+#House prices: Lasso, XGBoost, and a detailed EDA
+#----------------------------------------------
+install.packages("Rmisc")
+library(Rmisc)
+#===========Exploring some of the most important variables
+#---The response variable; SalePrice
+ggplot(data=all[!is.na(all$SalePrice),], aes(x=SalePrice)) +
+geom_histogram(fill="blue", binwidth = 10000) +
+scale_x_continuous(breaks= seq(0, 800000, by=100000), labels = comma)
+#As you can see, the sale prices are right skewed. This was expected as few people can afford very expensive houses. I will keep this in mind, and take measures before modeling.
+summary(all$SalePrice)
+#-----The most important numeric predictors
+#The character variables need some work before I can use them. To get a feel for the dataset, I decided to first see which numeric variables have a high correlation with the SalePrice.
+#:::: Correlations with SalePrice
+numericVars <- which(sapply(all, is.numeric)) #index vector numeric variables
+numericVarNames <- names(numericVars) #saving names vector for use later on
+cat('There are', length(numericVars), 'numeric variables')
+numericVarNames
+numericVars
+View(test)
+all_numVar <- all[, numericVars]
+cor_numVar <- cor(all_numVar, use="pairwise.complete.obs") #correlations of all numeric variables
+View(cor_numVar)
+#sort on decreasing correlations with SalePrice
+cor_sorted <- as.matrix(sort(cor_numVar[,'SalePrice'], decreasing = TRUE))
+View(cor_numVar)
+all_numVar <- all[, numericVars]
+cor_numVar <- cor(all_numVar, use="pairwise.complete.obs") #correlations of all numeric variables
+#sort on decreasing correlations with SalePrice
+cor_sorted <- as.matrix(sort(cor_numVar[,'SalePrice'], decreasing = TRUE))
+View(cor_sorted)
+#select only high corelations
+CorHigh <- names(which(apply(cor_sorted, 1, function(x) abs(x)>0.5)))
+cor_numVar <- cor_numVar[CorHigh, CorHigh]
+View(cor_numVar)
+#plot
+corrplot.mixed(cor_numVar, tl.col="black", tl.pos = "lt")
+#INFERENCE::
+#Altogether, there are 10 numeric variables with a correlation of at least 0.5 with SalePrice. All those correlations are positive.
+#It also becomes clear the multicollinearity is an issue. For example: the correlation between GarageCars and GarageArea is very high (0.89), and both have similar (high) correlations with SalePrice.
+#::::Overall Quality
+ggplot(data=all[!is.na(all$SalePrice),], aes(x=factor(OverallQual), y=SalePrice))+
+geom_boxplot(col='blue') + labs(x='Overall Quality') +
+scale_y_continuous(breaks= seq(0, 800000, by=100000), labels = comma)
+#The positive correlation is certainly there indeed, and seems to be a slightly upward curve.
+#Regarding outliers, I do not see any extreme values. If there is a candidate to take out as an outlier later on, it seems to be the expensive house with grade 4.
+#::::Above Grade (Ground) Living Area (square feet)
+#The numeric variable with the second highest correlation with SalesPrice is the Above Grade Living Area. This make a lot of sense; big houses are generally more expensive.
+ggplot(data=all[!is.na(all$SalePrice),], aes(x=GrLivArea, y=SalePrice))+
+geom_point(col='blue') + geom_smooth(method = "lm", se=FALSE, color="black", aes(group=1)) +
+scale_y_continuous(breaks= seq(0, 800000, by=100000), labels = comma) +
+geom_text_repel(aes(label = ifelse(all$GrLivArea[!is.na(all$SalePrice)]>4500, rownames(all), '')))
+#Especially the two houses with really big living areas and low SalePrices seem outliers (houses 524 and 1299, see labels in graph).
+#For instance, a low score on the Overall Quality could explain a low price. However, as you can see below, these two houses actually also score maximum points on Overall Quality.
+#Therefore, I will keep houses 1299 and 524 in mind as prime candidates to take out as outliers.
+all[c(524, 1299), c('SalePrice', 'GrLivArea', 'OverallQual')]
+#=====Missing data, label encoding, and factorizing variables
+#---Completeness of the data
+#First of all, I would like to see which variables contain missing values.
+NAcol <- which(colSums(is.na(all)) > 0)
+sort(colSums(sapply(all[NAcol], is.na)), decreasing = TRUE)
+cat('There are', length(NAcol), 'columns with missing values')
+View(all)
+#---Imputing missing data
+#>>Pool Quality and the PoolArea variable
+#So, it is obvious that I need to just assign ‘No Pool’ to the NAs. Also, the high number of NAs makes sense as normally only a small proportion of houses have a pool.
+all$PoolQC[is.na(all$PoolQC)] <- 'None'
+#It is also clear that I can label encode this variable as the values are ordinal. As there a multiple variables that use the same quality levels, I am going to create a vector that I can reuse later on.
+Qualities <- c('None' = 0, 'Po' = 1, 'Fa' = 2, 'TA' = 3, 'Gd' = 4, 'Ex' = 5)
+all$PoolQC<-as.integer(revalue(all$PoolQC, Qualities))
+table(all$PoolQC)
+#First, I checked if there was a clear relation between the PoolArea and the PoolQC. As I did not see a clear relation (bigger of smaller pools with better PoolQC),
+# I am going to impute PoolQC values based on the Overall Quality of the houses (which is not very high for those 3 houses).
+all[all$PoolArea>0 & all$PoolQC==0, c('PoolArea', 'PoolQC', 'OverallQual')]
+all$PoolQC[2421] <- 2
+all$PoolQC[2504] <- 3
+all$PoolQC[2600] <- 2
+View(all)
+#>>Miscellaneous feature
+#As the values are not ordinal, I will convert MiscFeature into a factor. Values:
+all$MiscFeature[is.na(all$MiscFeature)] <- 'None'
+all$MiscFeature <- as.factor(all$MiscFeature)
+ggplot(all[!is.na(all$SalePrice),], aes(x=MiscFeature, y=SalePrice)) +
+geom_bar(stat='summary', fun.y = "median", fill='blue') +
+scale_y_continuous(breaks= seq(0, 800000, by=100000), labels = comma) +
+geom_label(stat = "count", aes(label = ..count.., y = ..count..))
+table(all$MiscFeature)
+#>>alley
+#As the values are not ordinal, I will convert Alley into a factor. Values:
+all$Alley[is.na(all$Alley)] <- 'None'
+all$Alley <- as.factor(all$Alley)
+ggplot(all[!is.na(all$SalePrice),], aes(x=Alley, y=SalePrice)) +
+geom_bar(stat='summary', fun.y = "median", fill='blue')+
+scale_y_continuous(breaks= seq(0, 200000, by=50000), labels = comma)
+table(all$Alley)
+#>>Fence quality
+#The values seem to be ordinal. Values:(categorical value in series)
+all$Fence[is.na(all$Fence)] <- 'None'
+table(all$Fence)
+all[!is.na(all$SalePrice),] %>% group_by(Fence) %>% summarise(median = median(SalePrice), counts=n())
+#My conclusion is that the values do not seem ordinal (no fence is best). Therefore, I will convert Fence into a factor
+all$Fence <- as.factor(all$Fence)
+View(all)
+#>>Fireplace quality
+#The number of NAs in FireplaceQu matches the number of houses with 0 fireplaces. This means that I can safely replace the NAs in FireplaceQu with ‘no fireplace’.
+#The values are ordinal, and I can use the Qualities vector that I have already created for the Pool Quality. Values:
+all$FireplaceQu[is.na(all$FireplaceQu)] <- 'None'
+all$FireplaceQu<-as.integer(revalue(all$FireplaceQu, Qualities))
+table(all$FireplaceQu)
+table(all$Fireplaces)
+sum(table(all$Fireplaces))
+View(all)
+View(test)
+View(all)
+#>>LotFrontage(Linear feet of street connected to property)
+#The most reasonable imputation seems to take the median per neigborhood.
+ggplot(all[!is.na(all$LotFrontage),], aes(x=as.factor(Neighborhood), y=LotFrontage)) +
+geom_bar(stat='summary', fun.y = "median", fill='blue') +
+theme(axis.text.x = element_text(angle = 45, hjust = 1))
+for (i in 1:nrow(all)){
+if(is.na(all$LotFrontage[i])){
+all$LotFrontage[i] <- as.integer(median(all$LotFrontage[all$Neighborhood==all$Neighborhood[i]], na.rm=TRUE))
+}
+}
+View(all)
+View(all)
+#LotShape (General shape of property)
+all$LotShape<-as.integer(revalue(all$LotShape, c('IR3'=0, 'IR2'=1, 'IR1'=2, 'Reg'=3)))
+table(all$LotShape)
+sum(table(all$LotShape))
+#LotConfig (Lot configuration)
+#The values seemed possibly ordinal to me, but the visualization does not show this. Therefore, I will convert the variable into a factor.
+ggplot(all[!is.na(all$SalePrice),], aes(x=as.factor(LotConfig), y=SalePrice)) +
+geom_bar(stat='summary', fun.y = "median", fill='blue')+
+scale_y_continuous(breaks= seq(0, 800000, by=100000), labels = comma) +
+geom_label(stat = "count", aes(label = ..count.., y = ..count..))
+all$LotConfig <- as.factor(all$LotConfig)
+table(all$LotConfig)
+sum(table(all$LotConfig))
+#=====Missing data, label encoding, and factorizing variables
+#---Completeness of the data
+#First of all, I would like to see which variables contain missing values.
+NAcol <- which(colSums(is.na(all)) > 0)
+sort(colSums(sapply(all[NAcol], is.na)), decreasing = TRUE)
+cat('There are', length(NAcol), 'columns with missing values')
